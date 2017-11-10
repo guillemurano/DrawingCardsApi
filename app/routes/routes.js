@@ -1,36 +1,57 @@
 var ObjectID = require('mongodb').ObjectID;
 const cheerio = require('cheerio');
 const request = require('request');
+const iconv  = require('iconv-lite');
 
 module.exports = function(app, db) {
 
-    app.get('/scrape', (res, req) => {
-        const url = "http://www.acanomas.com/tableromania/6,008,003.htm";
-        
-        request(url, (error, response, html) => {
+    app.post('/scrape', (res, req) => {
+        const url = "http://www.acanomas.com/tableromania/6,008,003.htm";        
+        let cards = [];
+        const requestOptions  = { encoding: null, method: "GET", uri: url};
+
+        request(requestOptions, (error, response, html) => {
+            html = iconv.decode(new Buffer(html), "ISO-8859-1");
             if (!error) {
-                var $ = cheerio.load(html);        
-                let words = new Array();
-                let cards = new Array();
-        
-                words = $('#AutoNumber3').find('b').text().split('\n');
+                const $ = cheerio.load(html);
+                let words = [];
+                let asterisk = false;
 
-                for (let i = 0; i < words.length; i += 5) {
-                    if (words[i] === '*') {
-                        words[i + 1] = words[i] + words[i + 1]
-                        i++;
+                $('td[bgColor=#DADADA]', '#AutoNumber3').each((i, element) => {
+                    let card = $(element).text().split('\n');
+                    if (i === 0){
+                        words = card;
+                    }
+                    else{
+                        words = words.concat(card);
+                    }
+                });
+                
+                words = words.filter((word) => { return word.trim() != ''; });
+
+                words = words.map((item) => {
+                    let word = item.trim();
+                    asterisk = asterisk || (word === '*');
+                    
+                    if (asterisk && word !== '*') {
+                        word = '* ' + word;
+                        asterisk = false;
                     }
 
-                    let card = {
-                        place:  words[i],
-                        object:  words[i + 1],
-                        action:  words[i + 2],
-                        difficulty:  words[i + 3],
-                        allPlay:  words[i + 4]
-                    }
-                    cards.push(card);
+                    return word; 
+                });
+                
+                words = words.filter((word) => { return word && word != '*'; });
+                
+                for (let i = 0; i < words.length; i += 5){
+                    db.collection('cards').insert({
+                        place: words[i],
+                        object: words[i+1],
+                        action: words[i+2],
+                        difficulty: words[i+3],
+                        allPlay: words[i+4],
+                    });
                 }
-                res.send(cards);
             }
         });
     });
